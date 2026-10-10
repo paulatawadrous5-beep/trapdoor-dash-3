@@ -188,6 +188,7 @@
     [mainMenu, characterSelect, mapScreen, gameScreen].forEach(function (s) { s.classList.add("hidden"); });
     el.classList.remove("hidden");
     if (el === mainMenu) menuStarsVal.textContent = save.balance;
+    if (el === mapScreen) requestAnimationFrame(function () { fitMap(); });
   }
 
   // apply saved sound preference
@@ -333,11 +334,63 @@
     return d;
   }
 
+  var currentMapZone = 0;
+  var worldTabsEl = document.getElementById("worldTabs");
+  var mapViewportEl = document.getElementById("mapViewport");
+
+  function defaultMapZone() {
+    for (var z = 2; z >= 0; z--) if (save.unlocked[z] > 0) return z;
+    return 0;
+  }
+
   function buildMap() {
     pointsVal.textContent = save.balance;
-    zonesEl.innerHTML = "";
-    var svgNS = "http://www.w3.org/2000/svg";
+    if (!save.unlocked[currentMapZone]) currentMapZone = defaultMapZone();
+    buildWorldTabs();
+    showMapZone(currentMapZone);
+  }
+
+  function buildWorldTabs() {
+    worldTabsEl.innerHTML = "";
     ZONE_META.forEach(function (zm, z) {
+      var locked = !save.unlocked[z];
+      var b = document.createElement("button");
+      b.className = "world-tab" + (z === currentMapZone ? " active" : "") + (locked ? " locked" : "");
+      b.textContent = zm.emoji + " " + (z + 1);
+      if (!locked) {
+        (function (zone) {
+          b.addEventListener("click", function () { Sound.click(); showMapZone(zone); });
+        })(z);
+      }
+      worldTabsEl.appendChild(b);
+    });
+  }
+
+  function showMapZone(z) {
+    currentMapZone = z;
+    buildWorldTabs();
+    zonesEl.innerHTML = "";
+    zonesEl.appendChild(renderZoneIsland(z));
+    fitMap();
+  }
+
+  function fitMap() {
+    var inner = zonesEl.querySelector(".path-inner");
+    var lp = zonesEl.querySelector(".level-path");
+    if (!mapViewportEl || !inner || !lp) return;
+    var availW = mapViewportEl.clientWidth - 8;
+    var availH = mapViewportEl.clientHeight - 8;
+    if (availW < 50 || availH < 50) return;
+    var s = Math.min(availW / MAP_W, availH / MAP_H);
+    s = Math.max(0.25, Math.min(1.5, s));
+    inner.style.transform = "scale(" + s + ")";
+    lp.style.width = (MAP_W * s) + "px";
+    lp.style.height = (MAP_H * s) + "px";
+  }
+
+  function renderZoneIsland(z) {
+      var zm = ZONE_META[z];
+      var svgNS = "http://www.w3.org/2000/svg";
       var block = document.createElement("div");
       block.className = "zone-block";
       var doneCount = 0;
@@ -387,7 +440,7 @@
         svg.appendChild(crack);
       }
       // dashed connector path through node centers
-      var centers = NODE_POS.map(function (p) { return { x: p.x + 38, y: p.y + 46 }; });
+      var centers = NODE_POS.map(function (p) { return { x: p.x + 42, y: p.y + 50 }; });
       var conn = document.createElementNS(svgNS, "path");
       conn.setAttribute("d", smoothOpenPath(centers));
       conn.setAttribute("fill", "none");
@@ -432,16 +485,7 @@
 
       path.appendChild(inner);
       block.appendChild(path);
-      zonesEl.appendChild(block);
-    });
-    // scroll each path to the current node
-    Array.prototype.forEach.call(zonesEl.querySelectorAll(".level-path"), function (p) {
-      var cur = p.querySelector(".level-node.current") || p.querySelector(".level-node.unlocked");
-      if (cur) {
-        var target = cur.offsetLeft - p.clientWidth / 2 + 38;
-        p.scrollLeft = Math.max(0, target);
-      }
-    });
+      return block;
   }
 
   /* =========================================================
@@ -471,8 +515,16 @@
     canvas.style.height = h + "px";
     SCALE = (canvas.height / DESIGN_HEIGHT);
   }
-  window.addEventListener("resize", resizeCanvas);
-  window.addEventListener("orientationchange", function () { setTimeout(resizeCanvas, 200); });
+  window.addEventListener("resize", function () {
+    resizeCanvas();
+    if (!mapScreen.classList.contains("hidden")) fitMap();
+  });
+  window.addEventListener("orientationchange", function () {
+    setTimeout(function () {
+      resizeCanvas();
+      if (!mapScreen.classList.contains("hidden")) fitMap();
+    }, 200);
+  });
   resizeCanvas();
 
   /* =========================================================
