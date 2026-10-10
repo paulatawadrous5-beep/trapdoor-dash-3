@@ -281,9 +281,62 @@
     { name: "Hell's Gate", emoji: "🔥" }
   ];
 
+  // organic island map (Level-Devil style)
+  var NODE_POS = [
+    { x: 60, y: 400 }, { x: 175, y: 285 }, { x: 290, y: 415 }, { x: 400, y: 255 },
+    { x: 515, y: 395 }, { x: 625, y: 265 }, { x: 735, y: 400 }, { x: 835, y: 275 },
+    { x: 915, y: 405 }, { x: 985, y: 290 }
+  ];
+  var ISLAND_COLORS = [
+    { main: "#d29a4b", edge: "#8a5f24" },
+    { main: "#c07a45", edge: "#7a4a22" },
+    { main: "#a05540", edge: "#5f2f22" }
+  ];
+  var MAP_W = 1100, MAP_H = 560;
+
+  function mulberry32(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function islandPath(rng, cx, cy, rx, ry) {
+    var n = 26, pts = [];
+    for (var i = 0; i < n; i++) {
+      var a = (i / n) * Math.PI * 2;
+      var w = 0.82 + rng() * 0.36;
+      pts.push({ x: cx + Math.cos(a) * rx * w, y: cy + Math.sin(a) * ry * w });
+    }
+    // smooth closed curve through pts (Catmull-Rom -> bezier)
+    var d = "M " + pts[0].x.toFixed(1) + " " + pts[0].y.toFixed(1);
+    for (var k = 0; k < n; k++) {
+      var p0 = pts[(k - 1 + n) % n], p1 = pts[k], p2 = pts[(k + 1) % n], p3 = pts[(k + 2) % n];
+      var c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+      var c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+      d += " C " + c1x.toFixed(1) + " " + c1y.toFixed(1) + ", " + c2x.toFixed(1) + " " + c2y.toFixed(1) + ", " + p2.x.toFixed(1) + " " + p2.y.toFixed(1);
+    }
+    return d + " Z";
+  }
+
+  function smoothOpenPath(pts) {
+    var d = "M " + pts[0].x.toFixed(1) + " " + pts[0].y.toFixed(1);
+    for (var k = 0; k < pts.length - 1; k++) {
+      var p0 = pts[Math.max(0, k - 1)], p1 = pts[k], p2 = pts[k + 1], p3 = pts[Math.min(pts.length - 1, k + 2)];
+      var c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+      var c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+      d += " C " + c1x.toFixed(1) + " " + c1y.toFixed(1) + ", " + c2x.toFixed(1) + " " + c2y.toFixed(1) + ", " + p2.x.toFixed(1) + " " + p2.y.toFixed(1);
+    }
+    return d;
+  }
+
   function buildMap() {
     pointsVal.textContent = save.balance;
     zonesEl.innerHTML = "";
+    var svgNS = "http://www.w3.org/2000/svg";
     ZONE_META.forEach(function (zm, z) {
       var block = document.createElement("div");
       block.className = "zone-block";
@@ -297,38 +350,54 @@
       path.className = "level-path";
       var inner = document.createElement("div");
       inner.className = "path-inner";
-      // serpentine positions: 2 rows x 5 cols, snaking
-      var pos = [];
-      for (var l = 0; l < 10; l++) {
-        var row = Math.floor(l / 5);
-        var col = l % 5;
-        if (row === 1) col = 4 - col;
-        pos.push({ x: 40 + col * 240, y: row === 0 ? 18 : 134 });
-      }
-      // svg path connecting nodes
-      var svgNS = "http://www.w3.org/2000/svg";
+
+      var rng = mulberry32(1234 + z * 777);
+      var colors = ISLAND_COLORS[z];
       var svg = document.createElementNS(svgNS, "svg");
       svg.setAttribute("class", "path-svg");
-      svg.setAttribute("viewBox", "0 0 1240 240");
-      var dAttr = "";
-      for (var k = 0; k < pos.length; k++) {
-        var cx = pos[k].x + 38, cy = pos[k].y + 44;
-        if (k === 0) dAttr += "M " + cx + " " + cy;
-        else {
-          var px = pos[k - 1].x + 38, py = pos[k - 1].y + 44;
-          var mx = (px + cx) / 2;
-          dAttr += " C " + mx + " " + py + ", " + mx + " " + cy + ", " + cx + " " + cy;
+      svg.setAttribute("viewBox", "0 0 " + MAP_W + " " + MAP_H);
+
+      // island shadow edge
+      var edge = document.createElementNS(svgNS, "path");
+      edge.setAttribute("d", islandPath(rng, MAP_W / 2, MAP_H / 2 + 14, 520, 238));
+      edge.setAttribute("fill", colors.edge);
+      svg.appendChild(edge);
+      // island top
+      var top = document.createElementNS(svgNS, "path");
+      top.setAttribute("d", islandPath(rng, MAP_W / 2, MAP_H / 2, 520, 238));
+      top.setAttribute("fill", colors.main);
+      svg.appendChild(top);
+      // cracks texture
+      for (var ci = 0; ci < 10; ci++) {
+        var crack = document.createElementNS(svgNS, "polyline");
+        var sx = 80 + rng() * (MAP_W - 160), sy = 90 + rng() * (MAP_H - 180);
+        var pts = sx.toFixed(0) + "," + sy.toFixed(0);
+        var ang = rng() * Math.PI * 2;
+        for (var sgi = 0; sgi < 3; sgi++) {
+          ang += (rng() - 0.5) * 1.4;
+          sx += Math.cos(ang) * (18 + rng() * 26);
+          sy += Math.sin(ang) * (18 + rng() * 26);
+          pts += " " + sx.toFixed(0) + "," + sy.toFixed(0);
         }
+        crack.setAttribute("points", pts);
+        crack.setAttribute("fill", "none");
+        crack.setAttribute("stroke", "rgba(90,45,20,0.35)");
+        crack.setAttribute("stroke-width", "3");
+        crack.setAttribute("stroke-linecap", "round");
+        svg.appendChild(crack);
       }
-      var pathEl = document.createElementNS(svgNS, "path");
-      pathEl.setAttribute("d", dAttr);
-      pathEl.setAttribute("fill", "none");
-      pathEl.setAttribute("stroke", "#5a3038");
-      pathEl.setAttribute("stroke-width", "6");
-      pathEl.setAttribute("stroke-linecap", "round");
-      pathEl.setAttribute("stroke-dasharray", "2 14");
-      svg.appendChild(pathEl);
+      // dashed connector path through node centers
+      var centers = NODE_POS.map(function (p) { return { x: p.x + 38, y: p.y + 46 }; });
+      var conn = document.createElementNS(svgNS, "path");
+      conn.setAttribute("d", smoothOpenPath(centers));
+      conn.setAttribute("fill", "none");
+      conn.setAttribute("stroke", "#6e2a1c");
+      conn.setAttribute("stroke-width", "6");
+      conn.setAttribute("stroke-linecap", "round");
+      conn.setAttribute("stroke-dasharray", "2 13");
+      svg.appendChild(conn);
       inner.appendChild(svg);
+
       for (var n = 0; n < 10; n++) {
         (function (zone, lvl) {
           var node = document.createElement("button");
@@ -336,8 +405,8 @@
           var st = save.stars[starKey(zone, lvl)] || 0;
           node.className = "level-node" + (unlocked ? " unlocked" : " locked") + (st > 0 ? " done" : "");
           if (unlocked && st === 0) node.classList.add("current");
-          node.style.left = pos[lvl].x + "px";
-          node.style.top = pos[lvl].y + "px";
+          node.style.left = NODE_POS[lvl].x + "px";
+          node.style.top = NODE_POS[lvl].y + "px";
           var starsHtml = "";
           for (var s = 0; s < 3; s++) starsHtml += s < st ? "★" : "☆";
           node.innerHTML = '<span class="door-icon"></span>' +
@@ -353,12 +422,20 @@
           inner.appendChild(node);
         })(z, n);
       }
+      // devil marker at the end of the path
+      var devil = document.createElement("div");
+      devil.className = "map-devil";
+      devil.textContent = "😈";
+      devil.style.left = (NODE_POS[9].x + 110) + "px";
+      devil.style.top = (NODE_POS[9].y + 20) + "px";
+      inner.appendChild(devil);
+
       path.appendChild(inner);
       block.appendChild(path);
       zonesEl.appendChild(block);
     });
     // scroll each path to the current node
-    Array.prototype.forEach.call(zonesEl.querySelectorAll(".level-path"), function (p, zi) {
+    Array.prototype.forEach.call(zonesEl.querySelectorAll(".level-path"), function (p) {
       var cur = p.querySelector(".level-node.current") || p.querySelector(".level-node.unlocked");
       if (cur) {
         var target = cur.offsetLeft - p.clientWidth / 2 + 38;
@@ -1500,11 +1577,16 @@
       ctx.arc(gx + gex + 1.2, gy + gh * 0.22 - 1.2, 1.2, 0, Math.PI * 2);
       ctx.arc(gx + gex + (player.facing >= 0 ? -10 : 10) + 1.2, gy + gh * 0.22 - 1.2, 1.2, 0, Math.PI * 2);
       ctx.fill();
-      // blush
-      ctx.fillStyle = "rgba(255,110,140,0.85)";
+      // blush — big cute cheeks
+      ctx.fillStyle = "rgba(255,120,150,0.9)";
       ctx.beginPath();
-      ctx.arc(gx + gw * 0.2, gy + gh * 0.34, 3.2, 0, Math.PI * 2);
-      ctx.arc(gx + gw * 0.8, gy + gh * 0.34, 3.2, 0, Math.PI * 2);
+      ctx.arc(gx + gw * 0.18, gy + gh * 0.36, 4.6, 0, Math.PI * 2);
+      ctx.arc(gx + gw * 0.82, gy + gh * 0.36, 4.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,200,215,0.9)";
+      ctx.beginPath();
+      ctx.arc(gx + gw * 0.18 - 1, gy + gh * 0.36 - 1, 1.6, 0, Math.PI * 2);
+      ctx.arc(gx + gw * 0.82 - 1, gy + gh * 0.36 - 1, 1.6, 0, Math.PI * 2);
       ctx.fill();
       // smile
       ctx.strokeStyle = "#7a3b2e";
@@ -1512,6 +1594,27 @@
       ctx.beginPath();
       ctx.arc(gx + gw / 2, gy + gh * 0.32, 5, 0.25, Math.PI - 0.25);
       ctx.stroke();
+      // cute bow on top of head
+      ctx.fillStyle = "#ff5d8f";
+      var bowX = gx + gw * 0.72, bowY = gy - 3;
+      ctx.beginPath();
+      ctx.moveTo(bowX, bowY);
+      ctx.lineTo(bowX - 11, bowY - 7);
+      ctx.lineTo(bowX - 9, bowY + 5);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(bowX, bowY);
+      ctx.lineTo(bowX + 11, bowY - 7);
+      ctx.lineTo(bowX + 9, bowY + 5);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#e03a6e";
+      ctx.beginPath();
+      ctx.arc(bowX, bowY - 1, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.65)";
+      ctx.beginPath();
+      ctx.arc(bowX - 1, bowY - 2, 1.1, 0, Math.PI * 2);
+      ctx.fill();
       // navy top body
       ctx.fillStyle = "#2b3a67";
       roundRect(gx + 1, gy + gh * 0.44, gw - 2, gh * 0.56, 7);
