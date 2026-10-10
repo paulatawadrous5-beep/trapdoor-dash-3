@@ -16,6 +16,8 @@
   ];
 
   var selectedCharacter = 0;
+  var gloriaImg = new Image();
+  gloriaImg.src = "gloria-chibi.png";
 
   /* =========================================================
      SOUND (SFX only — no background music)
@@ -135,16 +137,12 @@
   ========================================================= */
   var mainMenu = document.getElementById("mainMenu");
   var characterSelect = document.getElementById("characterSelect");
-  var mapScreen = document.getElementById("mapScreen");
   var gameScreen = document.getElementById("gameScreen");
   var playBtn = document.getElementById("playBtn");
   var menuMuteBtn = document.getElementById("menuMuteBtn");
   var menuStarsVal = document.getElementById("menuStarsVal");
   var charGrid = document.getElementById("charGrid");
   var startBtn = document.getElementById("startBtn");
-  var mapMenuBtn = document.getElementById("mapMenuBtn");
-  var zonesEl = document.getElementById("zones");
-  var pointsVal = document.getElementById("pointsVal");
   var canvas = document.getElementById("gameCanvas");
   var ctx = canvas.getContext("2d");
   var hudLevel = document.getElementById("hudLevel");
@@ -184,11 +182,15 @@
   /* =========================================================
      SCREEN NAVIGATION
   ========================================================= */
+  function highestUnlockedLevel() {
+    var u = save.unlocked[0] || 1;
+    return Math.max(0, Math.min(9, u - 1));
+  }
+
   function showScreen(el) {
-    [mainMenu, characterSelect, mapScreen, gameScreen].forEach(function (s) { s.classList.add("hidden"); });
+    [mainMenu, characterSelect, gameScreen].forEach(function (s) { s.classList.add("hidden"); });
     el.classList.remove("hidden");
     if (el === mainMenu) menuStarsVal.textContent = save.balance;
-    if (el === mapScreen) { /* svg map scales itself */ }
   }
 
   // apply saved sound preference
@@ -231,28 +233,20 @@
   startBtn.addEventListener("click", function () {
     Sound.init();
     Sound.click();
-    buildMap();
-    showScreen(mapScreen);
-  });
-
-  mapMenuBtn.addEventListener("click", function () {
-    Sound.click();
-    showScreen(characterSelect);
+    startLevel(0, highestUnlockedLevel());
   });
 
   lcMapBtn.addEventListener("click", function () {
     Sound.click();
     levelCompleteOverlay.classList.add("hidden");
-    buildMap();
-    showScreen(mapScreen);
+    showScreen(mainMenu);
   });
 
   pauseMapBtn.addEventListener("click", function () {
     Sound.click();
     paused = false;
     pauseOverlay.classList.add("hidden");
-    buildMap();
-    showScreen(mapScreen);
+    showScreen(mainMenu);
   });
 
   muteBtn.addEventListener("click", function () {
@@ -277,200 +271,9 @@
      WORLD MAP
   ========================================================= */
   var ZONE_META = [
-    { name: "Green Hills", emoji: "🌿" },
-    { name: "Devil's Factory", emoji: "🏭" },
-    { name: "Hell's Gate", emoji: "🔥" }
+    { name: "Devil's Gauntlet", emoji: "🔥" }
   ];
 
-  // organic island map (Level-Devil style)
-  var NODE_POS = [
-    { x: 60, y: 400 }, { x: 175, y: 285 }, { x: 290, y: 415 }, { x: 400, y: 255 },
-    { x: 515, y: 395 }, { x: 625, y: 265 }, { x: 735, y: 400 }, { x: 835, y: 275 },
-    { x: 915, y: 405 }, { x: 985, y: 290 }
-  ];
-  var ISLAND_COLORS = [
-    { main: "#d29a4b", edge: "#8a5f24" },
-    { main: "#c07a45", edge: "#7a4a22" },
-    { main: "#a05540", edge: "#5f2f22" }
-  ];
-  var MAP_W = 1100, MAP_H = 560;
-
-  function mulberry32(seed) {
-    var a = seed >>> 0;
-    return function () {
-      a |= 0; a = (a + 0x6D2B79F5) | 0;
-      var t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
-  function islandPath(rng, cx, cy, rx, ry) {
-    var n = 26, pts = [];
-    for (var i = 0; i < n; i++) {
-      var a = (i / n) * Math.PI * 2;
-      var w = 0.82 + rng() * 0.36;
-      pts.push({ x: cx + Math.cos(a) * rx * w, y: cy + Math.sin(a) * ry * w });
-    }
-    // smooth closed curve through pts (Catmull-Rom -> bezier)
-    var d = "M " + pts[0].x.toFixed(1) + " " + pts[0].y.toFixed(1);
-    for (var k = 0; k < n; k++) {
-      var p0 = pts[(k - 1 + n) % n], p1 = pts[k], p2 = pts[(k + 1) % n], p3 = pts[(k + 2) % n];
-      var c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
-      var c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
-      d += " C " + c1x.toFixed(1) + " " + c1y.toFixed(1) + ", " + c2x.toFixed(1) + " " + c2y.toFixed(1) + ", " + p2.x.toFixed(1) + " " + p2.y.toFixed(1);
-    }
-    return d + " Z";
-  }
-
-  function smoothOpenPath(pts) {
-    var d = "M " + pts[0].x.toFixed(1) + " " + pts[0].y.toFixed(1);
-    for (var k = 0; k < pts.length - 1; k++) {
-      var p0 = pts[Math.max(0, k - 1)], p1 = pts[k], p2 = pts[k + 1], p3 = pts[Math.min(pts.length - 1, k + 2)];
-      var c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
-      var c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
-      d += " C " + c1x.toFixed(1) + " " + c1y.toFixed(1) + ", " + c2x.toFixed(1) + " " + c2y.toFixed(1) + ", " + p2.x.toFixed(1) + " " + p2.y.toFixed(1);
-    }
-    return d;
-  }
-
-  var currentMapZone = 0;
-  var worldTabsEl = document.getElementById("worldTabs");
-
-  function defaultMapZone() {
-    for (var z = 2; z >= 0; z--) if (save.unlocked[z] > 0) return z;
-    return 0;
-  }
-
-  function buildMap() {
-    pointsVal.textContent = save.balance;
-    if (!save.unlocked[currentMapZone]) currentMapZone = defaultMapZone();
-    buildWorldTabs();
-    showMapZone(currentMapZone);
-  }
-
-  function buildWorldTabs() {
-    worldTabsEl.innerHTML = "";
-    ZONE_META.forEach(function (zm, z) {
-      var locked = !save.unlocked[z];
-      var b = document.createElement("button");
-      b.className = "world-tab" + (z === currentMapZone ? " active" : "") + (locked ? " locked" : "");
-      b.textContent = zm.emoji + " " + (z + 1);
-      if (!locked) {
-        (function (zone) {
-          b.addEventListener("click", function () { Sound.click(); showMapZone(zone); });
-        })(z);
-      }
-      worldTabsEl.appendChild(b);
-    });
-  }
-
-  function showMapZone(z) {
-    currentMapZone = z;
-    buildWorldTabs();
-    zonesEl.innerHTML = "";
-    zonesEl.appendChild(renderZoneIsland(z));
-  }
-
-    function renderZoneIsland(z) {
-    var zm = ZONE_META[z];
-    var svgNS = "http://www.w3.org/2000/svg";
-    function el(name, attrs) {
-      var e = document.createElementNS(svgNS, name);
-      for (var k in attrs) e.setAttribute(k, attrs[k]);
-      return e;
-    }
-    var block = document.createElement("div");
-    block.className = "zone-block";
-    var doneCount = 0;
-    for (var i = 0; i < 10; i++) { if (save.stars[starKey(z, i)] > 0) doneCount++; }
-    var head = document.createElement("div");
-    head.className = "zone-head";
-    head.innerHTML = '<span class="zone-emoji">' + zm.emoji + '</span>' +
-      '<span class="zone-name">' + zm.name + '</span>' +
-      '<span class="zone-progress">' + doneCount + '/10</span>';
-    block.appendChild(head);
-
-    var svg = el("svg", { "class": "map-svg", viewBox: "0 0 " + MAP_W + " " + MAP_H, preserveAspectRatio: "xMidYMid meet" });
-    var rng = mulberry32(1234 + z * 777);
-    var colors = ISLAND_COLORS[z];
-
-    // twinkling background sparks
-    for (var di = 0; di < 26; di++) {
-      svg.appendChild(el("circle", {
-        cx: (rng() * MAP_W).toFixed(0), cy: (rng() * MAP_H).toFixed(0),
-        r: (1 + rng() * 2).toFixed(1), fill: "#ffd23f",
-        "class": "twinkle", style: "animation-delay:" + (rng() * 3).toFixed(1) + "s"
-      }));
-    }
-    // island
-    svg.appendChild(el("path", { d: islandPath(rng, MAP_W / 2, MAP_H / 2 + 16, 520, 240), fill: colors.edge }));
-    svg.appendChild(el("path", { d: islandPath(rng, MAP_W / 2, MAP_H / 2, 520, 240), fill: colors.main }));
-    // cracks
-    for (var ci = 0; ci < 10; ci++) {
-      var sx = 80 + rng() * (MAP_W - 160), sy = 90 + rng() * (MAP_H - 180);
-      var pts = sx.toFixed(0) + "," + sy.toFixed(0);
-      var ang = rng() * Math.PI * 2;
-      for (var sgi = 0; sgi < 3; sgi++) {
-        ang += (rng() - 0.5) * 1.4;
-        sx += Math.cos(ang) * (18 + rng() * 26);
-        sy += Math.sin(ang) * (18 + rng() * 26);
-        pts += " " + sx.toFixed(0) + "," + sy.toFixed(0);
-      }
-      svg.appendChild(el("polyline", { points: pts, fill: "none", stroke: "rgba(90,45,20,0.35)", "stroke-width": 3, "stroke-linecap": "round" }));
-    }
-    // flowing dashed connector
-    var centers = NODE_POS.map(function (p) { return { x: p.x + 42, y: p.y + 50 }; });
-    svg.appendChild(el("path", {
-      d: smoothOpenPath(centers), fill: "none", stroke: "#6e2a1c",
-      "stroke-width": 6, "stroke-linecap": "round", "stroke-dasharray": "2 13", "class": "map-flow"
-    }));
-
-    // level door nodes (inside SVG so everything scales together)
-    for (var n = 0; n < 10; n++) {
-      (function (lvl) {
-        var unlocked = lvl < save.unlocked[z];
-        var st = save.stars[starKey(z, lvl)] || 0;
-        var isCurrent = unlocked && st === 0;
-        var px = NODE_POS[lvl].x, py = NODE_POS[lvl].y;
-        var stroke, doorFill;
-        if (!unlocked) { stroke = "#4a4f5c"; doorFill = "#5a5f6a"; }
-        else if (st > 0) { stroke = "#00e5a0"; doorFill = "#9fe8c9"; }
-        else if (isCurrent) { stroke = "#ffd23f"; doorFill = "#c3c9d4"; }
-        else { stroke = "#ff3b3b"; doorFill = "#c3c9d4"; }
-        var g = el("g", { "class": "map-node" });
-        if (!unlocked) g.setAttribute("opacity", "0.62");
-        g.appendChild(el("rect", { x: px, y: py, width: 84, height: 100, rx: 18, fill: "#171217", "fill-opacity": 0.88, stroke: stroke, "stroke-width": 3.5 }));
-        if (isCurrent) g.appendChild(el("rect", { x: px - 7, y: py - 7, width: 98, height: 114, rx: 24, fill: "none", stroke: "#ffd23f", "stroke-width": 3, "class": "halo" }));
-        g.appendChild(el("rect", { x: px + 27, y: py + 8, width: 30, height: 36, rx: 14, fill: doorFill, stroke: "#23262c", "stroke-width": 2 }));
-        g.appendChild(el("circle", { cx: px + 50, cy: py + 28, r: 3, fill: "#23262c" }));
-        var num = el("text", { x: px + 42, y: py + 68, "text-anchor": "middle", "font-size": 24, "font-weight": 900, fill: "#ffffff", "font-family": "'Trebuchet MS',sans-serif" });
-        num.textContent = String(lvl + 1);
-        g.appendChild(num);
-        var sh = "";
-        for (var s = 0; s < 3; s++) sh += s < st ? "★" : "☆";
-        var stx = el("text", { x: px + 42, y: py + 92, "text-anchor": "middle", "font-size": 17, fill: "#ffd23f" });
-        stx.textContent = sh;
-        g.appendChild(stx);
-        if (!unlocked) {
-          var lock = el("text", { x: px + 42, y: py + 44, "text-anchor": "middle", "font-size": 26 });
-          lock.textContent = "🔒";
-          g.appendChild(lock);
-        } else {
-          g.style.cursor = "pointer";
-          g.addEventListener("click", function () { Sound.click(); startLevel(z, lvl); });
-        }
-        svg.appendChild(g);
-      })(n);
-    }
-    // devil marker at the end
-    var dev = el("text", { x: NODE_POS[9].x + 118, y: NODE_POS[9].y + 66, "font-size": 46, "text-anchor": "middle", "class": "map-devil-svg" });
-    dev.textContent = "😈";
-    svg.appendChild(dev);
-
-    block.appendChild(svg);
-    return block;
-  }
 
   /* =========================================================
      TOUCH DETECTION
@@ -590,14 +393,13 @@
   });
   zoneNextBtn.addEventListener("click", function () {
     Sound.click();
-    zoneCompleteOverlay.classList.remove("hidden");
+    zoneCompleteOverlay.classList.add("hidden");
     paulSplit.classList.remove("play");
-    buildMap();
-    showScreen(mapScreen);
+    showScreen(mainMenu);
   });
 
   /* =========================================================
-     LEVELS — 3 zones x 10 levels = 30 levels
+     LEVELS — 10-level gauntlet (1 easy + 9 brutal)
      GY = 520. P(x,y,w,h) helper.
   ========================================================= */
   var GY = 520;
@@ -917,7 +719,14 @@
           door: P(4660, GY - 90, 60, 90) }
       ]
     }
-  ];
+  ]
+  /* v6: no map — single 10-level gauntlet. Level 1 easy, rest brutal. */
+  (function () {
+    var easyFirst = ZONES[0].levels[0];
+    var brutal = ZONES[2].levels.slice(1, 10);
+    ZONES = [{ bg: "#160b0b", levels: [easyFirst].concat(brutal) }];
+  })();
+;
 
   /* =========================================================
      PHYSICS CONSTANTS
@@ -960,7 +769,7 @@
     starsGot = 0;
     stepTimer = 0;
     hintBoughtThisOpen = false;
-    hudLevel.textContent = (z + 1) + "-" + (l + 1) + " " + level.name;
+    hudLevel.textContent = "LV " + (l + 1) + " · " + level.name;
     hudStars.textContent = "★ 0/3";
     refreshHintBtn();
     resetPlayer();
@@ -974,7 +783,7 @@
     hintText.classList.add("hidden");
     showScreen(gameScreen);
     resizeCanvas();
-    showReady((z + 1) + "-" + (l + 1) + " · " + level.name);
+    showReady("LEVEL " + (l + 1) + " · " + level.name);
     lastTime = performance.now();
     requestAnimationFrame(loop);
   }
@@ -1042,8 +851,7 @@
   gameOverMapBtn.addEventListener("click", function () {
     Sound.click();
     gameOverOverlay.classList.add("hidden");
-    buildMap();
-    showScreen(mapScreen);
+    showScreen(mainMenu);
   });
 
   function completeLevel() {
@@ -1081,8 +889,8 @@
         save.unlocked[curZone + 1] = Math.max(save.unlocked[curZone + 1], 1);
         persistSave();
       }
-      zoneTitle.textContent = ZONE_META[curZone].name + " Complete!";
-      zoneSub.textContent = curZone + 1 < 3 ? "The next zone awaits..." : "You conquered all 30 levels. LEGEND.";
+      zoneTitle.textContent = "ALL 10 LEVELS CLEARED!";
+      zoneSub.textContent = "You survived the Devil's Gauntlet. LEGEND. 😈";
       paulSplit.classList.remove("play");
       void paulSplit.offsetWidth;
       paulSplit.classList.add("play");
@@ -1570,77 +1378,20 @@
     ctx.fill();
     ctx.fillStyle = "#1a1a1a";
     var eyeY = player.y + player.h * 0.32;
-        if (c.cute) {
-      // Gloria — simple cute bean (like the yellow character), navy body,
-      // pink bow on head, big eyes, red cheeks
-      var gx = player.x, gy = player.y, gw = player.w, gh = player.h;
-      // bean body
-      ctx.fillStyle = "#2b3a67";
-      roundRect(gx, gy, gw, gh, 12);
-      ctx.fill();
-      // soft top highlight
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
-      roundRect(gx + 4, gy + 3, gw - 8, gh * 0.3, 8);
-      ctx.fill();
-      // two big cute eyes
-      var eyeY2 = gy + gh * 0.34;
-      var exL = gx + gw * 0.30, exR = gx + gw * 0.70;
-      ctx.fillStyle = "#14141c";
-      ctx.beginPath();
-      ctx.arc(exL, eyeY2, 4.6, 0, Math.PI * 2);
-      ctx.arc(exR, eyeY2, 4.6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(exL + 1.5, eyeY2 - 1.5, 1.6, 0, Math.PI * 2);
-      ctx.arc(exR + 1.5, eyeY2 - 1.5, 1.6, 0, Math.PI * 2);
-      ctx.fill();
-      // red cute cheeks
-      ctx.fillStyle = "rgba(255,70,90,0.9)";
-      ctx.beginPath();
-      ctx.arc(gx + gw * 0.16, gy + gh * 0.52, 4.4, 0, Math.PI * 2);
-      ctx.arc(gx + gw * 0.84, gy + gh * 0.52, 4.4, 0, Math.PI * 2);
-      ctx.fill();
-      // happy smile
-      ctx.strokeStyle = "#101018";
-      ctx.lineWidth = 1.8;
-      ctx.beginPath();
-      ctx.arc(gx + gw / 2, gy + gh * 0.5, 5.5, 0.3, Math.PI - 0.3);
-      ctx.stroke();
-      // tiny yellow flower on body
-      var fx = gx + gw * 0.72, fy = gy + gh * 0.74;
-      ctx.fillStyle = "#ffd23f";
-      for (var fi = 0; fi < 5; fi++) {
-        var fa = (fi / 5) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.arc(fx + Math.cos(fa) * 3, fy + Math.sin(fa) * 3, 2.1, 0, Math.PI * 2);
+            if (c.cute) {
+      // Gloria chibi (photo-inspired) — PNG sprite, flips with facing
+      var gw2 = 40, gh2 = 67;
+      ctx.save();
+      ctx.translate(player.x + player.w / 2, player.y + player.h + 5);
+      ctx.scale(player.facing >= 0 ? 1 : -1, 1);
+      if (gloriaImg.complete && gloriaImg.naturalWidth > 0) {
+        ctx.drawImage(gloriaImg, -gw2 / 2, -gh2, gw2, gh2);
+      } else {
+        ctx.fillStyle = "#2b3a67";
+        roundRect(-gw2 / 2, -gh2, gw2, gh2, 12);
         ctx.fill();
       }
-      ctx.fillStyle = "#e09b00";
-      ctx.beginPath();
-      ctx.arc(fx, fy, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-      // pink bow on top of head
-      ctx.fillStyle = "#ff5d8f";
-      var bowX = gx + gw / 2, bowY = gy - 2;
-      ctx.beginPath();
-      ctx.moveTo(bowX, bowY);
-      ctx.lineTo(bowX - 12, bowY - 8);
-      ctx.lineTo(bowX - 10, bowY + 6);
-      ctx.closePath(); ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(bowX, bowY);
-      ctx.lineTo(bowX + 12, bowY - 8);
-      ctx.lineTo(bowX + 10, bowY + 6);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#e03a6e";
-      ctx.beginPath();
-      ctx.arc(bowX, bowY - 1, 3.4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.7)";
-      ctx.beginPath();
-      ctx.arc(bowX - 1, bowY - 2, 1.2, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.restore();
     } else {
       var eyeOffset = player.facing >= 0 ? player.w * 0.55 : player.w * 0.2;
       ctx.beginPath();
