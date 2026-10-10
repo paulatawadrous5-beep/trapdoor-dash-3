@@ -12,7 +12,7 @@
     { name: "Marmar", color: "#ff8fd8", dark: "#c95fab" },
     { name: "Miko",   color: "#b98cff", dark: "#8a5ee0" },
     { name: "Mariam", color: "#ffb26b", dark: "#d1813a" },
-    { name: "Gloria", color: "#00e5a0", dark: "#009e6e", cute: true }
+    { name: "Gloria", color: "#2b3a67", dark: "#1a2547", cute: true }
   ];
 
   var selectedCharacter = 0;
@@ -58,6 +58,36 @@
     click: function () { this.tone(620, 0.05, "square", 0.08); },
     spawn: function () { this.tone(150, 0.4, "sawtooth", 0.16, 80); },
     fake: function () { this.tone(180, 0.25, "square", 0.14, 90); },
+    land: function () { this.tone(140, 0.08, "triangle", 0.10, 70); },
+    fall: function () { this.tone(600, 0.45, "square", 0.08, 120); },
+    doorOpen: function () {
+      this.tone(180, 0.18, "sawtooth", 0.08, 320);
+      this.tone(520, 0.14, "square", 0.10, 780, 0.16);
+    },
+    gameover: function () {
+      // dark, rough, frightening descending growl
+      var s = this;
+      if (s.muted || !s.ctx) return;
+      var t = s.ctx.currentTime;
+      var o = s.ctx.createOscillator();
+      var g = s.ctx.createGain();
+      var lfo = s.ctx.createOscillator();
+      var lfoG = s.ctx.createGain();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(85, t);
+      o.frequency.exponentialRampToValueAtTime(32, t + 1.3);
+      lfo.type = "square";
+      lfo.frequency.setValueAtTime(9, t);
+      lfoG.gain.setValueAtTime(22, t);
+      lfo.connect(lfoG);
+      lfoG.connect(o.frequency);
+      g.gain.setValueAtTime(0.22, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 1.4);
+      o.connect(g);
+      g.connect(s.ctx.destination);
+      o.start(t); lfo.start(t);
+      o.stop(t + 1.45); lfo.stop(t + 1.45);
+    },
     devil: function () {
       var s = this;
       s.tone(90, 0.5, "sawtooth", 0.18, 45);
@@ -66,18 +96,31 @@
   };
 
   /* =========================================================
-     SAVE SYSTEM
+     SAVE SYSTEM (v2: star currency, hints, lives-free progress)
   ========================================================= */
-  var SAVE_KEY = "td3_save_v1";
-  var save = { stars: {}, points: 0, unlocked: [1, 0, 0] };
+  var SAVE_KEY = "td3_save_v2";
+  var save = { stars: {}, done: {}, balance: 0, unlocked: [1, 0, 0], hints: {}, muted: false };
   function loadSave() {
     try {
       var raw = localStorage.getItem(SAVE_KEY);
       if (raw) {
         var d = JSON.parse(raw);
         if (d.stars) save.stars = d.stars;
-        if (typeof d.points === "number") save.points = d.points;
+        if (d.done) save.done = d.done;
+        if (typeof d.balance === "number") save.balance = d.balance;
         if (d.unlocked) save.unlocked = d.unlocked;
+        if (d.hints) save.hints = d.hints;
+        if (typeof d.muted === "boolean") save.muted = d.muted;
+        return;
+      }
+      // migrate from v1
+      var old = localStorage.getItem("td3_save_v1");
+      if (old) {
+        var o = JSON.parse(old);
+        if (o.stars) save.stars = o.stars;
+        if (o.unlocked) save.unlocked = o.unlocked;
+        save.balance = Math.floor((o.points || 0) / 30);
+        persistSave();
       }
     } catch (e) {}
   }
@@ -90,9 +133,13 @@
   /* =========================================================
      DOM
   ========================================================= */
+  var mainMenu = document.getElementById("mainMenu");
   var characterSelect = document.getElementById("characterSelect");
   var mapScreen = document.getElementById("mapScreen");
   var gameScreen = document.getElementById("gameScreen");
+  var playBtn = document.getElementById("playBtn");
+  var menuMuteBtn = document.getElementById("menuMuteBtn");
+  var menuStarsVal = document.getElementById("menuStarsVal");
   var charGrid = document.getElementById("charGrid");
   var startBtn = document.getElementById("startBtn");
   var mapMenuBtn = document.getElementById("mapMenuBtn");
@@ -101,8 +148,8 @@
   var canvas = document.getElementById("gameCanvas");
   var ctx = canvas.getContext("2d");
   var hudLevel = document.getElementById("hudLevel");
+  var hudLives = document.getElementById("hudLives");
   var hudStars = document.getElementById("hudStars");
-  var hudTries = document.getElementById("hudTries");
   var pauseBtn = document.getElementById("pauseBtn");
   var muteBtn = document.getElementById("muteBtn");
   var readyOverlay = document.getElementById("readyOverlay");
@@ -120,6 +167,11 @@
   var zoneSub = document.getElementById("zoneSub");
   var zoneNextBtn = document.getElementById("zoneNextBtn");
   var pauseOverlay = document.getElementById("pauseOverlay");
+  var gameOverOverlay = document.getElementById("gameOverOverlay");
+  var gameOverSub = document.getElementById("gameOverSub");
+  var gameOverStars = document.getElementById("gameOverStars");
+  var retryBtn = document.getElementById("retryBtn");
+  var gameOverMapBtn = document.getElementById("gameOverMapBtn");
   var resumeBtn = document.getElementById("resumeBtn");
   var restartBtn = document.getElementById("restartBtn");
   var pauseMapBtn = document.getElementById("pauseMapBtn");
@@ -129,15 +181,38 @@
   var btnRight = document.getElementById("btnRight");
   var btnJump = document.getElementById("btnJump");
 
-  var HINT_COST = 150;
-
   /* =========================================================
      SCREEN NAVIGATION
   ========================================================= */
   function showScreen(el) {
-    [characterSelect, mapScreen, gameScreen].forEach(function (s) { s.classList.add("hidden"); });
+    [mainMenu, characterSelect, mapScreen, gameScreen].forEach(function (s) { s.classList.add("hidden"); });
     el.classList.remove("hidden");
+    if (el === mainMenu) menuStarsVal.textContent = save.balance;
   }
+
+  // apply saved sound preference
+  Sound.muted = !!save.muted;
+
+  function refreshMuteBtns() {
+    muteBtn.textContent = Sound.muted ? "🔇" : "🔊";
+    menuMuteBtn.textContent = Sound.muted ? "🔇 SOUND OFF" : "🔊 SOUND ON";
+  }
+  refreshMuteBtns();
+
+  playBtn.addEventListener("click", function () {
+    Sound.init();
+    Sound.click();
+    showScreen(characterSelect);
+  });
+
+  menuMuteBtn.addEventListener("click", function () {
+    Sound.init();
+    Sound.muted = !Sound.muted;
+    save.muted = Sound.muted;
+    persistSave();
+    refreshMuteBtns();
+    if (!Sound.muted) Sound.click();
+  });
 
   var cards = Array.prototype.slice.call(charGrid.querySelectorAll(".char-card"));
   cards.forEach(function (card) {
@@ -182,9 +257,20 @@
   muteBtn.addEventListener("click", function () {
     Sound.init();
     Sound.muted = !Sound.muted;
-    muteBtn.textContent = Sound.muted ? "🔇" : "🔊";
+    save.muted = Sound.muted;
+    persistSave();
+    refreshMuteBtns();
     if (!Sound.muted) Sound.click();
   });
+
+  var HINT_BASE = 5;
+  function hintCost() {
+    var bought = save.hints[starKey(curZone, curLevel)] || 0;
+    return Math.min(HINT_BASE * (bought + 1), 15);
+  }
+  function refreshHintBtn() {
+    hintBtn.textContent = "💡 HINT (" + hintCost() + " ⭐)";
+  }
 
   /* =========================================================
      WORLD MAP
@@ -196,7 +282,7 @@
   ];
 
   function buildMap() {
-    pointsVal.textContent = save.points;
+    pointsVal.textContent = save.balance;
     zonesEl.innerHTML = "";
     ZONE_META.forEach(function (zm, z) {
       var block = document.createElement("div");
@@ -209,27 +295,75 @@
         '<span class="zone-progress">' + doneCount + '/10</span></div>';
       var path = document.createElement("div");
       path.className = "level-path";
+      var inner = document.createElement("div");
+      inner.className = "path-inner";
+      // serpentine positions: 2 rows x 5 cols, snaking
+      var pos = [];
       for (var l = 0; l < 10; l++) {
+        var row = Math.floor(l / 5);
+        var col = l % 5;
+        if (row === 1) col = 4 - col;
+        pos.push({ x: 40 + col * 240, y: row === 0 ? 18 : 134 });
+      }
+      // svg path connecting nodes
+      var svgNS = "http://www.w3.org/2000/svg";
+      var svg = document.createElementNS(svgNS, "svg");
+      svg.setAttribute("class", "path-svg");
+      svg.setAttribute("viewBox", "0 0 1240 240");
+      var dAttr = "";
+      for (var k = 0; k < pos.length; k++) {
+        var cx = pos[k].x + 38, cy = pos[k].y + 44;
+        if (k === 0) dAttr += "M " + cx + " " + cy;
+        else {
+          var px = pos[k - 1].x + 38, py = pos[k - 1].y + 44;
+          var mx = (px + cx) / 2;
+          dAttr += " C " + mx + " " + py + ", " + mx + " " + cy + ", " + cx + " " + cy;
+        }
+      }
+      var pathEl = document.createElementNS(svgNS, "path");
+      pathEl.setAttribute("d", dAttr);
+      pathEl.setAttribute("fill", "none");
+      pathEl.setAttribute("stroke", "#5a3038");
+      pathEl.setAttribute("stroke-width", "6");
+      pathEl.setAttribute("stroke-linecap", "round");
+      pathEl.setAttribute("stroke-dasharray", "2 14");
+      svg.appendChild(pathEl);
+      inner.appendChild(svg);
+      for (var n = 0; n < 10; n++) {
         (function (zone, lvl) {
           var node = document.createElement("button");
           var unlocked = lvl < save.unlocked[zone];
           var st = save.stars[starKey(zone, lvl)] || 0;
           node.className = "level-node" + (unlocked ? " unlocked" : " locked") + (st > 0 ? " done" : "");
           if (unlocked && st === 0) node.classList.add("current");
+          node.style.left = pos[lvl].x + "px";
+          node.style.top = pos[lvl].y + "px";
           var starsHtml = "";
           for (var s = 0; s < 3; s++) starsHtml += s < st ? "★" : "☆";
-          node.innerHTML = (lvl + 1) + '<span class="node-stars">' + starsHtml + "</span>";
+          node.innerHTML = '<span class="door-icon"></span>' +
+            '<span class="node-num">' + (lvl + 1) + '</span>' +
+            '<span class="node-stars">' + starsHtml + "</span>";
+          node.setAttribute("aria-label", "Level " + (lvl + 1) + (unlocked ? "" : " (locked)"));
           if (unlocked) {
             node.addEventListener("click", function () {
               Sound.click();
               startLevel(zone, lvl);
             });
           }
-          path.appendChild(node);
-        })(z, l);
+          inner.appendChild(node);
+        })(z, n);
       }
+      path.appendChild(inner);
       block.appendChild(path);
       zonesEl.appendChild(block);
+    });
+    // scroll each path to the current node
+    Array.prototype.forEach.call(zonesEl.querySelectorAll(".level-path"), function (p, zi) {
+      var cur = p.querySelector(".level-node.current") || p.querySelector(".level-node.unlocked");
+      if (cur) {
+        var target = cur.offsetLeft - p.clientWidth / 2 + 38;
+        p.scrollLeft = Math.max(0, target);
+      }
     });
   }
 
@@ -304,7 +438,13 @@
     Sound.click();
     paused = !paused;
     pauseOverlay.classList.toggle("hidden", !paused);
-    if (!paused) { hintText.classList.add("hidden"); }
+    if (!paused) {
+      hintText.classList.add("hidden");
+    } else {
+      hintBoughtThisOpen = false;
+      hintText.classList.add("hidden");
+      refreshHintBtn();
+    }
   });
   resumeBtn.addEventListener("click", function () {
     Sound.click();
@@ -325,14 +465,20 @@
     advanceLevel();
   });
   hintBtn.addEventListener("click", function () {
-    if (save.points >= HINT_COST) {
-      save.points -= HINT_COST;
+    if (hintBoughtThisOpen) return; // prevent duplicate charges
+    var cost = hintCost();
+    if (save.balance >= cost) {
+      save.balance -= cost;
+      var k = starKey(curZone, curLevel);
+      save.hints[k] = (save.hints[k] || 0) + 1;
       persistSave();
+      hintBoughtThisOpen = true;
       hintText.textContent = "💡 " + level.hint;
       hintText.classList.remove("hidden");
+      hintBtn.textContent = "💡 HINT SHOWN";
       Sound.star();
     } else {
-      hintText.textContent = "Not enough points! Collect ★ stars to earn more.";
+      hintText.textContent = "Not enough stars! You need " + cost + " ⭐ (you have " + save.balance + ").";
       hintText.classList.remove("hidden");
       Sound.click();
     }
@@ -677,8 +823,6 @@
   var FRICTION_GROUND = 2400;
   var PLAYER_W = 30;
   var PLAYER_H = 46;
-  var STAR_PTS = 30;
-  var COMPLETE_PTS = 100;
 
   /* =========================================================
      GAME STATE
@@ -687,28 +831,40 @@
   var level = null;
   var player = null;
   var camera = { x: 0, y: 0 };
-  var tries = 1;
+  var lives = 5;
+  var MAX_LIVES = 5;
   var starsGot = 0;
   var levelActive = false;
   var paused = false;
   var lastTime = 0;
   var stepTimer = 0;
+  var hintBoughtThisOpen = false;
+  var fallWhistled = false;
+
+  function updateLivesHUD() {
+    var h = "";
+    for (var i = 0; i < MAX_LIVES; i++) h += i < lives ? "❤" : "🖤";
+    hudLives.textContent = h;
+  }
 
   function startLevel(z, l) {
     curZone = z; curLevel = l;
     level = cloneLevel(ZONES[z].levels[l]);
-    tries = 1;
+    lives = MAX_LIVES;
+    updateLivesHUD();
     starsGot = 0;
     stepTimer = 0;
+    hintBoughtThisOpen = false;
     hudLevel.textContent = (z + 1) + "-" + (l + 1) + " " + level.name;
-    hudTries.textContent = "Tries: " + tries;
     hudStars.textContent = "★ 0/3";
+    refreshHintBtn();
     resetPlayer();
     camera.x = 0;
     camera.y = 0;
     levelActive = true;
     paused = false;
     levelCompleteOverlay.classList.add("hidden");
+    gameOverOverlay.classList.add("hidden");
     pauseOverlay.classList.add("hidden");
     hintText.classList.add("hidden");
     showScreen(gameScreen);
@@ -736,6 +892,7 @@
     level.saws.forEach(function (s) { s.baseX = s.x; s.baseY = s.y; s.t = s.phase || 0; s.angle = 0; });
     level.chasers.forEach(function (c) { c.active = false; c.cx = c.x; c.cy = c.y; c.wob = Math.random() * 6.28; });
     level.stars.forEach(function (s) { s.got = false; });
+    fallWhistled = false;
   }
 
   var READY_SUBS = [
@@ -755,20 +912,49 @@
     if (!player.alive) return;
     player.alive = false;
     if (!silent) Sound.death();
-    tries++;
-    hudTries.textContent = "Tries: " + tries;
-    setTimeout(function () { resetPlayer(); }, 350);
+    lives--;
+    updateLivesHUD();
+    if (lives <= 0) {
+      setTimeout(gameOver, 400);
+    } else {
+      setTimeout(function () { resetPlayer(); }, 350);
+    }
   }
+
+  function gameOver() {
+    levelActive = false;
+    Sound.gameover();
+    gameOverSub.textContent = "You reached " + (curZone + 1) + "-" + (curLevel + 1) + " · " + level.name;
+    gameOverStars.textContent = save.balance;
+    gameOverOverlay.classList.remove("hidden");
+  }
+
+  retryBtn.addEventListener("click", function () {
+    Sound.click();
+    startLevel(curZone, curLevel);
+  });
+
+  gameOverMapBtn.addEventListener("click", function () {
+    Sound.click();
+    gameOverOverlay.classList.add("hidden");
+    buildMap();
+    showScreen(mapScreen);
+  });
 
   function completeLevel() {
     levelActive = false;
-    Sound.win();
+    Sound.doorOpen();
+    setTimeout(function () { Sound.win(); }, 200);
     var key = starKey(curZone, curLevel);
     var prevBest = save.stars[key] || 0;
-    var newStars = Math.max(prevBest, starsGot);
-    save.stars[key] = newStars;
-    var gained = COMPLETE_PTS + starsGot * STAR_PTS;
-    save.points += gained;
+    save.stars[key] = Math.max(prevBest, starsGot);
+    var firstTime = !save.done[key];
+    var gained = 0;
+    if (firstTime) {
+      save.done[key] = true;
+      gained = 5;
+      save.balance += gained;
+    }
     if (curLevel + 1 < 10) {
       save.unlocked[curZone] = Math.max(save.unlocked[curZone], curLevel + 2);
     }
@@ -776,8 +962,8 @@
     var sh = "";
     for (var i = 0; i < 3; i++) sh += i < starsGot ? "★" : '<span class="dim">★</span>';
     lcStars.innerHTML = sh;
-    lcTries.textContent = "Finished in " + tries + " " + (tries === 1 ? "try" : "tries");
-    lcPoints.textContent = "+" + gained + " pts  (⭐ " + save.points + ")";
+    lcTries.textContent = "Level " + (curZone + 1) + "-" + (curLevel + 1) + " cleared!";
+    lcPoints.textContent = firstTime ? "+" + gained + " ⭐  (balance: " + save.balance + ")" : "Already completed — no extra stars. Balance: " + save.balance + " ⭐";
     levelCompleteOverlay.classList.remove("hidden");
   }
 
@@ -947,6 +1133,12 @@
     player.vy += GRAVITY * dt;
     if (player.vy > 1600) player.vy = 1600;
 
+    // falling whistle (long falls)
+    if (!player.grounded && player.vy > 950 && !fallWhistled) {
+      fallWhistled = true;
+      Sound.fall();
+    }
+
     // carry on moving platform
     var carryDX = 0, carryDY = 0;
     if (player.grounded && player.standingOn && player.standingOn._isMoving) {
@@ -959,6 +1151,8 @@
     player.y += player.vy * dt + carryDY;
 
     // collision
+    var wasGrounded = player.grounded;
+    var impactVy = player.vy;
     player.grounded = false;
     player.standingOn = null;
     var solids = collectSolids();
@@ -981,6 +1175,12 @@
     });
 
     level.moving.forEach(function (m) { m._isMoving = true; m._prevX = m.x; m._prevY = m.y; });
+
+    // landing sound
+    if (!wasGrounded && player.grounded) {
+      fallWhistled = false;
+      if (impactVy > 500) Sound.land();
+    }
 
     checkHazards();
 
@@ -1266,34 +1466,68 @@
     ctx.fillStyle = "#1a1a1a";
     var eyeY = player.y + player.h * 0.32;
     if (c.cute) {
-      // Gloria: big cute eyes
-      var ex = player.facing >= 0 ? player.w * 0.62 : player.w * 0.14;
+      // Gloria — photo-inspired cartoon: long dark wavy hair, navy top, yellow flower
+      var gx = player.x, gy = player.y, gw = player.w, gh = player.h;
+      // hair back mass
+      ctx.fillStyle = "#232026";
+      roundRect(gx - 3, gy - 4, gw + 6, gh * 0.72, 10);
+      ctx.fill();
+      // face
+      ctx.fillStyle = "#f6c9a8";
+      roundRect(gx + 3, gy + 2, gw - 6, gh * 0.34, 8);
+      ctx.fill();
+      // hair fringe
+      ctx.fillStyle = "#232026";
       ctx.beginPath();
-      ctx.arc(player.x + ex, eyeY, 4.5, 0, Math.PI * 2);
-      ctx.arc(player.x + ex + (player.facing >= 0 ? -11 : 11), eyeY, 4.5, 0, Math.PI * 2);
+      ctx.moveTo(gx + 2, gy + 10);
+      ctx.quadraticCurveTo(gx + gw / 2, gy - 6, gx + gw - 2, gy + 10);
+      ctx.lineTo(gx + gw - 2, gy + 4);
+      ctx.quadraticCurveTo(gx + gw / 2, gy - 2, gx + 2, gy + 4);
+      ctx.closePath();
+      ctx.fill();
+      // side hair strands
+      ctx.fillRect(gx - 2, gy + 8, 7, gh * 0.5);
+      ctx.fillRect(gx + gw - 5, gy + 8, 7, gh * 0.5);
+      // big expressive eyes
+      var gex = player.facing >= 0 ? gw * 0.62 : gw * 0.16;
+      ctx.fillStyle = "#1a1a1a";
+      ctx.beginPath();
+      ctx.arc(gx + gex, gy + gh * 0.22, 3.6, 0, Math.PI * 2);
+      ctx.arc(gx + gex + (player.facing >= 0 ? -10 : 10), gy + gh * 0.22, 3.6, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.arc(player.x + ex + 1.5, eyeY - 1.5, 1.5, 0, Math.PI * 2);
-      ctx.arc(player.x + ex + (player.facing >= 0 ? -11 : 11) + 1.5, eyeY - 1.5, 1.5, 0, Math.PI * 2);
+      ctx.arc(gx + gex + 1.2, gy + gh * 0.22 - 1.2, 1.2, 0, Math.PI * 2);
+      ctx.arc(gx + gex + (player.facing >= 0 ? -10 : 10) + 1.2, gy + gh * 0.22 - 1.2, 1.2, 0, Math.PI * 2);
       ctx.fill();
       // blush
-      ctx.fillStyle = "rgba(255,90,130,0.8)";
+      ctx.fillStyle = "rgba(255,110,140,0.85)";
       ctx.beginPath();
-      ctx.arc(player.x + player.w * 0.2, player.y + player.h * 0.55, 4, 0, Math.PI * 2);
-      ctx.arc(player.x + player.w * 0.8, player.y + player.h * 0.55, 4, 0, Math.PI * 2);
+      ctx.arc(gx + gw * 0.2, gy + gh * 0.34, 3.2, 0, Math.PI * 2);
+      ctx.arc(gx + gw * 0.8, gy + gh * 0.34, 3.2, 0, Math.PI * 2);
       ctx.fill();
-      // bow
-      ctx.fillStyle = "#ff4d88";
-      var bx = player.x + player.w - 6, by = player.y - 4;
+      // smile
+      ctx.strokeStyle = "#7a3b2e";
+      ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.moveTo(bx, by); ctx.lineTo(bx - 12, by - 8); ctx.lineTo(bx - 10, by + 4);
-      ctx.closePath(); ctx.fill();
+      ctx.arc(gx + gw / 2, gy + gh * 0.32, 5, 0.25, Math.PI - 0.25);
+      ctx.stroke();
+      // navy top body
+      ctx.fillStyle = "#2b3a67";
+      roundRect(gx + 1, gy + gh * 0.44, gw - 2, gh * 0.56, 7);
+      ctx.fill();
+      // yellow flower pin
+      var fx = gx + gw * 0.72, fy = gy + gh * 0.52;
+      ctx.fillStyle = "#ffd23f";
+      for (var pi = 0; pi < 5; pi++) {
+        var pa = (pi / 5) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.arc(fx + Math.cos(pa) * 3.4, fy + Math.sin(pa) * 3.4, 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = "#e09b00";
       ctx.beginPath();
-      ctx.moveTo(bx, by); ctx.lineTo(bx + 2, by - 10); ctx.lineTo(bx + 8, by);
-      ctx.closePath(); ctx.fill();
-      ctx.beginPath();
-      ctx.arc(bx - 2, by - 2, 3.5, 0, Math.PI * 2);
+      ctx.arc(fx, fy, 2, 0, Math.PI * 2);
       ctx.fill();
     } else {
       var eyeOffset = player.facing >= 0 ? player.w * 0.55 : player.w * 0.2;
