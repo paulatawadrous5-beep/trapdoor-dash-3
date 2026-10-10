@@ -1,4 +1,4 @@
-var CACHE = "td3-v5";
+var CACHE = "td3-v6";
 var FILES = [
   "./",
   "./index.html",
@@ -7,7 +7,9 @@ var FILES = [
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
-  "./icon-180.png"
+  "./icon-180.png",
+  "./gloria-chibi.png",
+  "./gloria-avatar.png"
 ];
 
 self.addEventListener("install", function (e) {
