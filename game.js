@@ -188,7 +188,7 @@
     [mainMenu, characterSelect, mapScreen, gameScreen].forEach(function (s) { s.classList.add("hidden"); });
     el.classList.remove("hidden");
     if (el === mainMenu) menuStarsVal.textContent = save.balance;
-    if (el === mapScreen) requestAnimationFrame(function () { fitMap(); });
+    if (el === mapScreen) { /* svg map scales itself */ }
   }
 
   // apply saved sound preference
@@ -336,7 +336,6 @@
 
   var currentMapZone = 0;
   var worldTabsEl = document.getElementById("worldTabs");
-  var mapViewportEl = document.getElementById("mapViewport");
 
   function defaultMapZone() {
     for (var z = 2; z >= 0; z--) if (save.unlocked[z] > 0) return z;
@@ -371,121 +370,106 @@
     buildWorldTabs();
     zonesEl.innerHTML = "";
     zonesEl.appendChild(renderZoneIsland(z));
-    fitMap();
   }
 
-  function fitMap() {
-    var inner = zonesEl.querySelector(".path-inner");
-    var lp = zonesEl.querySelector(".level-path");
-    if (!mapViewportEl || !inner || !lp) return;
-    var availW = mapViewportEl.clientWidth - 8;
-    var availH = mapViewportEl.clientHeight - 8;
-    if (availW < 50 || availH < 50) return;
-    var s = Math.min(availW / MAP_W, availH / MAP_H);
-    s = Math.max(0.25, Math.min(1.5, s));
-    inner.style.transform = "scale(" + s + ")";
-    lp.style.width = (MAP_W * s) + "px";
-    lp.style.height = (MAP_H * s) + "px";
-  }
+    function renderZoneIsland(z) {
+    var zm = ZONE_META[z];
+    var svgNS = "http://www.w3.org/2000/svg";
+    function el(name, attrs) {
+      var e = document.createElementNS(svgNS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+    var block = document.createElement("div");
+    block.className = "zone-block";
+    var doneCount = 0;
+    for (var i = 0; i < 10; i++) { if (save.stars[starKey(z, i)] > 0) doneCount++; }
+    var head = document.createElement("div");
+    head.className = "zone-head";
+    head.innerHTML = '<span class="zone-emoji">' + zm.emoji + '</span>' +
+      '<span class="zone-name">' + zm.name + '</span>' +
+      '<span class="zone-progress">' + doneCount + '/10</span>';
+    block.appendChild(head);
 
-  function renderZoneIsland(z) {
-      var zm = ZONE_META[z];
-      var svgNS = "http://www.w3.org/2000/svg";
-      var block = document.createElement("div");
-      block.className = "zone-block";
-      var doneCount = 0;
-      for (var i = 0; i < 10; i++) { if (save.stars[starKey(z, i)] > 0) doneCount++; }
-      block.innerHTML =
-        '<div class="zone-head"><span class="zone-emoji">' + zm.emoji + '</span>' +
-        '<span class="zone-name">' + zm.name + '</span>' +
-        '<span class="zone-progress">' + doneCount + '/10</span></div>';
-      var path = document.createElement("div");
-      path.className = "level-path";
-      var inner = document.createElement("div");
-      inner.className = "path-inner";
+    var svg = el("svg", { "class": "map-svg", viewBox: "0 0 " + MAP_W + " " + MAP_H, preserveAspectRatio: "xMidYMid meet" });
+    var rng = mulberry32(1234 + z * 777);
+    var colors = ISLAND_COLORS[z];
 
-      var rng = mulberry32(1234 + z * 777);
-      var colors = ISLAND_COLORS[z];
-      var svg = document.createElementNS(svgNS, "svg");
-      svg.setAttribute("class", "path-svg");
-      svg.setAttribute("viewBox", "0 0 " + MAP_W + " " + MAP_H);
+    // twinkling background sparks
+    for (var di = 0; di < 26; di++) {
+      svg.appendChild(el("circle", {
+        cx: (rng() * MAP_W).toFixed(0), cy: (rng() * MAP_H).toFixed(0),
+        r: (1 + rng() * 2).toFixed(1), fill: "#ffd23f",
+        "class": "twinkle", style: "animation-delay:" + (rng() * 3).toFixed(1) + "s"
+      }));
+    }
+    // island
+    svg.appendChild(el("path", { d: islandPath(rng, MAP_W / 2, MAP_H / 2 + 16, 520, 240), fill: colors.edge }));
+    svg.appendChild(el("path", { d: islandPath(rng, MAP_W / 2, MAP_H / 2, 520, 240), fill: colors.main }));
+    // cracks
+    for (var ci = 0; ci < 10; ci++) {
+      var sx = 80 + rng() * (MAP_W - 160), sy = 90 + rng() * (MAP_H - 180);
+      var pts = sx.toFixed(0) + "," + sy.toFixed(0);
+      var ang = rng() * Math.PI * 2;
+      for (var sgi = 0; sgi < 3; sgi++) {
+        ang += (rng() - 0.5) * 1.4;
+        sx += Math.cos(ang) * (18 + rng() * 26);
+        sy += Math.sin(ang) * (18 + rng() * 26);
+        pts += " " + sx.toFixed(0) + "," + sy.toFixed(0);
+      }
+      svg.appendChild(el("polyline", { points: pts, fill: "none", stroke: "rgba(90,45,20,0.35)", "stroke-width": 3, "stroke-linecap": "round" }));
+    }
+    // flowing dashed connector
+    var centers = NODE_POS.map(function (p) { return { x: p.x + 42, y: p.y + 50 }; });
+    svg.appendChild(el("path", {
+      d: smoothOpenPath(centers), fill: "none", stroke: "#6e2a1c",
+      "stroke-width": 6, "stroke-linecap": "round", "stroke-dasharray": "2 13", "class": "map-flow"
+    }));
 
-      // island shadow edge
-      var edge = document.createElementNS(svgNS, "path");
-      edge.setAttribute("d", islandPath(rng, MAP_W / 2, MAP_H / 2 + 14, 520, 238));
-      edge.setAttribute("fill", colors.edge);
-      svg.appendChild(edge);
-      // island top
-      var top = document.createElementNS(svgNS, "path");
-      top.setAttribute("d", islandPath(rng, MAP_W / 2, MAP_H / 2, 520, 238));
-      top.setAttribute("fill", colors.main);
-      svg.appendChild(top);
-      // cracks texture
-      for (var ci = 0; ci < 10; ci++) {
-        var crack = document.createElementNS(svgNS, "polyline");
-        var sx = 80 + rng() * (MAP_W - 160), sy = 90 + rng() * (MAP_H - 180);
-        var pts = sx.toFixed(0) + "," + sy.toFixed(0);
-        var ang = rng() * Math.PI * 2;
-        for (var sgi = 0; sgi < 3; sgi++) {
-          ang += (rng() - 0.5) * 1.4;
-          sx += Math.cos(ang) * (18 + rng() * 26);
-          sy += Math.sin(ang) * (18 + rng() * 26);
-          pts += " " + sx.toFixed(0) + "," + sy.toFixed(0);
+    // level door nodes (inside SVG so everything scales together)
+    for (var n = 0; n < 10; n++) {
+      (function (lvl) {
+        var unlocked = lvl < save.unlocked[z];
+        var st = save.stars[starKey(z, lvl)] || 0;
+        var isCurrent = unlocked && st === 0;
+        var px = NODE_POS[lvl].x, py = NODE_POS[lvl].y;
+        var stroke, doorFill;
+        if (!unlocked) { stroke = "#4a4f5c"; doorFill = "#5a5f6a"; }
+        else if (st > 0) { stroke = "#00e5a0"; doorFill = "#9fe8c9"; }
+        else if (isCurrent) { stroke = "#ffd23f"; doorFill = "#c3c9d4"; }
+        else { stroke = "#ff3b3b"; doorFill = "#c3c9d4"; }
+        var g = el("g", { "class": "map-node" });
+        if (!unlocked) g.setAttribute("opacity", "0.62");
+        g.appendChild(el("rect", { x: px, y: py, width: 84, height: 100, rx: 18, fill: "#171217", "fill-opacity": 0.88, stroke: stroke, "stroke-width": 3.5 }));
+        if (isCurrent) g.appendChild(el("rect", { x: px - 7, y: py - 7, width: 98, height: 114, rx: 24, fill: "none", stroke: "#ffd23f", "stroke-width": 3, "class": "halo" }));
+        g.appendChild(el("rect", { x: px + 27, y: py + 8, width: 30, height: 36, rx: 14, fill: doorFill, stroke: "#23262c", "stroke-width": 2 }));
+        g.appendChild(el("circle", { cx: px + 50, cy: py + 28, r: 3, fill: "#23262c" }));
+        var num = el("text", { x: px + 42, y: py + 68, "text-anchor": "middle", "font-size": 24, "font-weight": 900, fill: "#ffffff", "font-family": "'Trebuchet MS',sans-serif" });
+        num.textContent = String(lvl + 1);
+        g.appendChild(num);
+        var sh = "";
+        for (var s = 0; s < 3; s++) sh += s < st ? "★" : "☆";
+        var stx = el("text", { x: px + 42, y: py + 92, "text-anchor": "middle", "font-size": 17, fill: "#ffd23f" });
+        stx.textContent = sh;
+        g.appendChild(stx);
+        if (!unlocked) {
+          var lock = el("text", { x: px + 42, y: py + 44, "text-anchor": "middle", "font-size": 26 });
+          lock.textContent = "🔒";
+          g.appendChild(lock);
+        } else {
+          g.style.cursor = "pointer";
+          g.addEventListener("click", function () { Sound.click(); startLevel(z, lvl); });
         }
-        crack.setAttribute("points", pts);
-        crack.setAttribute("fill", "none");
-        crack.setAttribute("stroke", "rgba(90,45,20,0.35)");
-        crack.setAttribute("stroke-width", "3");
-        crack.setAttribute("stroke-linecap", "round");
-        svg.appendChild(crack);
-      }
-      // dashed connector path through node centers
-      var centers = NODE_POS.map(function (p) { return { x: p.x + 42, y: p.y + 50 }; });
-      var conn = document.createElementNS(svgNS, "path");
-      conn.setAttribute("d", smoothOpenPath(centers));
-      conn.setAttribute("fill", "none");
-      conn.setAttribute("stroke", "#6e2a1c");
-      conn.setAttribute("stroke-width", "6");
-      conn.setAttribute("stroke-linecap", "round");
-      conn.setAttribute("stroke-dasharray", "2 13");
-      svg.appendChild(conn);
-      inner.appendChild(svg);
+        svg.appendChild(g);
+      })(n);
+    }
+    // devil marker at the end
+    var dev = el("text", { x: NODE_POS[9].x + 118, y: NODE_POS[9].y + 66, "font-size": 46, "text-anchor": "middle", "class": "map-devil-svg" });
+    dev.textContent = "😈";
+    svg.appendChild(dev);
 
-      for (var n = 0; n < 10; n++) {
-        (function (zone, lvl) {
-          var node = document.createElement("button");
-          var unlocked = lvl < save.unlocked[zone];
-          var st = save.stars[starKey(zone, lvl)] || 0;
-          node.className = "level-node" + (unlocked ? " unlocked" : " locked") + (st > 0 ? " done" : "");
-          if (unlocked && st === 0) node.classList.add("current");
-          node.style.left = NODE_POS[lvl].x + "px";
-          node.style.top = NODE_POS[lvl].y + "px";
-          var starsHtml = "";
-          for (var s = 0; s < 3; s++) starsHtml += s < st ? "★" : "☆";
-          node.innerHTML = '<span class="door-icon"></span>' +
-            '<span class="node-num">' + (lvl + 1) + '</span>' +
-            '<span class="node-stars">' + starsHtml + "</span>";
-          node.setAttribute("aria-label", "Level " + (lvl + 1) + (unlocked ? "" : " (locked)"));
-          if (unlocked) {
-            node.addEventListener("click", function () {
-              Sound.click();
-              startLevel(zone, lvl);
-            });
-          }
-          inner.appendChild(node);
-        })(z, n);
-      }
-      // devil marker at the end of the path
-      var devil = document.createElement("div");
-      devil.className = "map-devil";
-      devil.textContent = "😈";
-      devil.style.left = (NODE_POS[9].x + 110) + "px";
-      devil.style.top = (NODE_POS[9].y + 20) + "px";
-      inner.appendChild(devil);
-
-      path.appendChild(inner);
-      block.appendChild(path);
-      return block;
+    block.appendChild(svg);
+    return block;
   }
 
   /* =========================================================
@@ -515,16 +499,8 @@
     canvas.style.height = h + "px";
     SCALE = (canvas.height / DESIGN_HEIGHT);
   }
-  window.addEventListener("resize", function () {
-    resizeCanvas();
-    if (!mapScreen.classList.contains("hidden")) fitMap();
-  });
-  window.addEventListener("orientationchange", function () {
-    setTimeout(function () {
-      resizeCanvas();
-      if (!mapScreen.classList.contains("hidden")) fitMap();
-    }, 200);
-  });
+  window.addEventListener("resize", resizeCanvas);
+  window.addEventListener("orientationchange", function () { setTimeout(resizeCanvas, 200); });
   resizeCanvas();
 
   /* =========================================================
@@ -1594,95 +1570,76 @@
     ctx.fill();
     ctx.fillStyle = "#1a1a1a";
     var eyeY = player.y + player.h * 0.32;
-    if (c.cute) {
-      // Gloria — photo-inspired cartoon: long dark wavy hair, navy top, yellow flower
+        if (c.cute) {
+      // Gloria — simple cute bean (like the yellow character), navy body,
+      // pink bow on head, big eyes, red cheeks
       var gx = player.x, gy = player.y, gw = player.w, gh = player.h;
-      // hair back mass
-      ctx.fillStyle = "#232026";
-      roundRect(gx - 3, gy - 4, gw + 6, gh * 0.72, 10);
+      // bean body
+      ctx.fillStyle = "#2b3a67";
+      roundRect(gx, gy, gw, gh, 12);
       ctx.fill();
-      // face
-      ctx.fillStyle = "#f6c9a8";
-      roundRect(gx + 3, gy + 2, gw - 6, gh * 0.34, 8);
+      // soft top highlight
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      roundRect(gx + 4, gy + 3, gw - 8, gh * 0.3, 8);
       ctx.fill();
-      // hair fringe
-      ctx.fillStyle = "#232026";
+      // two big cute eyes
+      var eyeY2 = gy + gh * 0.34;
+      var exL = gx + gw * 0.30, exR = gx + gw * 0.70;
+      ctx.fillStyle = "#14141c";
       ctx.beginPath();
-      ctx.moveTo(gx + 2, gy + 10);
-      ctx.quadraticCurveTo(gx + gw / 2, gy - 6, gx + gw - 2, gy + 10);
-      ctx.lineTo(gx + gw - 2, gy + 4);
-      ctx.quadraticCurveTo(gx + gw / 2, gy - 2, gx + 2, gy + 4);
-      ctx.closePath();
-      ctx.fill();
-      // side hair strands
-      ctx.fillRect(gx - 2, gy + 8, 7, gh * 0.5);
-      ctx.fillRect(gx + gw - 5, gy + 8, 7, gh * 0.5);
-      // big expressive eyes
-      var gex = player.facing >= 0 ? gw * 0.62 : gw * 0.16;
-      ctx.fillStyle = "#1a1a1a";
-      ctx.beginPath();
-      ctx.arc(gx + gex, gy + gh * 0.22, 3.6, 0, Math.PI * 2);
-      ctx.arc(gx + gex + (player.facing >= 0 ? -10 : 10), gy + gh * 0.22, 3.6, 0, Math.PI * 2);
+      ctx.arc(exL, eyeY2, 4.6, 0, Math.PI * 2);
+      ctx.arc(exR, eyeY2, 4.6, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.arc(gx + gex + 1.2, gy + gh * 0.22 - 1.2, 1.2, 0, Math.PI * 2);
-      ctx.arc(gx + gex + (player.facing >= 0 ? -10 : 10) + 1.2, gy + gh * 0.22 - 1.2, 1.2, 0, Math.PI * 2);
+      ctx.arc(exL + 1.5, eyeY2 - 1.5, 1.6, 0, Math.PI * 2);
+      ctx.arc(exR + 1.5, eyeY2 - 1.5, 1.6, 0, Math.PI * 2);
       ctx.fill();
-      // blush — big cute cheeks
-      ctx.fillStyle = "rgba(255,120,150,0.9)";
+      // red cute cheeks
+      ctx.fillStyle = "rgba(255,70,90,0.9)";
       ctx.beginPath();
-      ctx.arc(gx + gw * 0.18, gy + gh * 0.36, 4.6, 0, Math.PI * 2);
-      ctx.arc(gx + gw * 0.82, gy + gh * 0.36, 4.6, 0, Math.PI * 2);
+      ctx.arc(gx + gw * 0.16, gy + gh * 0.52, 4.4, 0, Math.PI * 2);
+      ctx.arc(gx + gw * 0.84, gy + gh * 0.52, 4.4, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "rgba(255,200,215,0.9)";
+      // happy smile
+      ctx.strokeStyle = "#101018";
+      ctx.lineWidth = 1.8;
       ctx.beginPath();
-      ctx.arc(gx + gw * 0.18 - 1, gy + gh * 0.36 - 1, 1.6, 0, Math.PI * 2);
-      ctx.arc(gx + gw * 0.82 - 1, gy + gh * 0.36 - 1, 1.6, 0, Math.PI * 2);
-      ctx.fill();
-      // smile
-      ctx.strokeStyle = "#7a3b2e";
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.arc(gx + gw / 2, gy + gh * 0.32, 5, 0.25, Math.PI - 0.25);
+      ctx.arc(gx + gw / 2, gy + gh * 0.5, 5.5, 0.3, Math.PI - 0.3);
       ctx.stroke();
-      // cute bow on top of head
-      ctx.fillStyle = "#ff5d8f";
-      var bowX = gx + gw * 0.72, bowY = gy - 3;
-      ctx.beginPath();
-      ctx.moveTo(bowX, bowY);
-      ctx.lineTo(bowX - 11, bowY - 7);
-      ctx.lineTo(bowX - 9, bowY + 5);
-      ctx.closePath(); ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(bowX, bowY);
-      ctx.lineTo(bowX + 11, bowY - 7);
-      ctx.lineTo(bowX + 9, bowY + 5);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = "#e03a6e";
-      ctx.beginPath();
-      ctx.arc(bowX, bowY - 1, 3.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.65)";
-      ctx.beginPath();
-      ctx.arc(bowX - 1, bowY - 2, 1.1, 0, Math.PI * 2);
-      ctx.fill();
-      // navy top body
-      ctx.fillStyle = "#2b3a67";
-      roundRect(gx + 1, gy + gh * 0.44, gw - 2, gh * 0.56, 7);
-      ctx.fill();
-      // yellow flower pin
-      var fx = gx + gw * 0.72, fy = gy + gh * 0.52;
+      // tiny yellow flower on body
+      var fx = gx + gw * 0.72, fy = gy + gh * 0.74;
       ctx.fillStyle = "#ffd23f";
-      for (var pi = 0; pi < 5; pi++) {
-        var pa = (pi / 5) * Math.PI * 2;
+      for (var fi = 0; fi < 5; fi++) {
+        var fa = (fi / 5) * Math.PI * 2;
         ctx.beginPath();
-        ctx.arc(fx + Math.cos(pa) * 3.4, fy + Math.sin(pa) * 3.4, 2.4, 0, Math.PI * 2);
+        ctx.arc(fx + Math.cos(fa) * 3, fy + Math.sin(fa) * 3, 2.1, 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.fillStyle = "#e09b00";
       ctx.beginPath();
-      ctx.arc(fx, fy, 2, 0, Math.PI * 2);
+      ctx.arc(fx, fy, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+      // pink bow on top of head
+      ctx.fillStyle = "#ff5d8f";
+      var bowX = gx + gw / 2, bowY = gy - 2;
+      ctx.beginPath();
+      ctx.moveTo(bowX, bowY);
+      ctx.lineTo(bowX - 12, bowY - 8);
+      ctx.lineTo(bowX - 10, bowY + 6);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(bowX, bowY);
+      ctx.lineTo(bowX + 12, bowY - 8);
+      ctx.lineTo(bowX + 10, bowY + 6);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#e03a6e";
+      ctx.beginPath();
+      ctx.arc(bowX, bowY - 1, 3.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      ctx.beginPath();
+      ctx.arc(bowX - 1, bowY - 2, 1.2, 0, Math.PI * 2);
       ctx.fill();
     } else {
       var eyeOffset = player.facing >= 0 ? player.w * 0.55 : player.w * 0.2;
