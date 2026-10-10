@@ -1,4 +1,4 @@
-var CACHE = "td3-v3";
+var CACHE = "td3-v4";
 var FILES = [
   "./",
   "./index.html",
