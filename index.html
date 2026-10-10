@@ -18,8 +18,19 @@
 <body>
 <div id="app">
 
+  <!-- MAIN MENU -->
+  <div id="mainMenu" class="screen">
+    <div class="menu-devil">😈</div>
+    <h1 class="title">TRAPDOOR DASH <span class="three">3</span></h1>
+    <p class="subtitle">PAUL'S DEVIL RUN</p>
+    <div id="menuStars" class="menu-stars">💫 <span id="menuStarsVal">0</span> stars</div>
+    <button id="playBtn" class="primary-btn big-play">▶ PLAY</button>
+    <button id="menuMuteBtn" class="secondary-btn">🔊 SOUND ON</button>
+    <p class="menu-hint">30 levels · 3 worlds · How long can you survive?</p>
+  </div>
+
   <!-- CHARACTER SELECT -->
-  <div id="characterSelect" class="screen">
+  <div id="characterSelect" class="screen hidden">
     <h1 class="title">TRAPDOOR DASH <span class="three">3</span></h1>
     <p class="subtitle">30 levels · 3 zones · Pick your runner</p>
     <div id="charGrid" class="char-grid">
@@ -52,7 +63,7 @@
         <span class="char-name">Mariam</span>
       </button>
       <button class="char-card gloria-card" data-char="7">
-        <div class="char-avatar gloria-avatar"><div class="gloria-bow"></div><div class="char-avatar-eye gloria-eye"></div><div class="char-avatar-eye gloria-eye"></div><div class="gloria-blush left"></div><div class="gloria-blush right"></div></div>
+        <img class="char-photo" src="gloria-avatar.png" alt="Gloria" />
         <span class="char-name">Gloria</span>
       </button>
     </div>
@@ -77,8 +88,8 @@
 
     <div id="hud">
       <div id="hudLevel">1-1</div>
+      <div id="hudLives">❤❤❤❤❤</div>
       <div id="hudStars">★ 0/3</div>
-      <div id="hudTries">Tries: 1</div>
     </div>
 
     <button id="muteBtn" aria-label="Mute">🔊</button>
@@ -120,6 +131,17 @@
         <h2 id="zoneTitle">Zone Complete!</h2>
         <p id="zoneSub"></p>
         <button id="zoneNextBtn" class="primary-btn">CONTINUE</button>
+      </div>
+    </div>
+
+    <div id="gameOverOverlay" class="overlay hidden">
+      <div class="overlay-card devil-card gameover-card">
+        <div class="gameover-devil">😈</div>
+        <h2>GAME OVER</h2>
+        <p id="gameOverSub">The devils got you...</p>
+        <p class="points-line">💫 <span id="gameOverStars">0</span> stars</p>
+        <button id="retryBtn" class="primary-btn">↻ RETRY LEVEL</button>
+        <button id="gameOverMapBtn" class="secondary-btn">WORLD MAP</button>
       </div>
     </div>
 
