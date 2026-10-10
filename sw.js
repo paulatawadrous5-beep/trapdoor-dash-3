@@ -1,15 +1,15 @@
-var CACHE = "td3-v6";
+var CACHE = "td3-v7";
 var FILES = [
   "./",
   "./index.html",
-  "./style.css",
-  "./game.js",
+  "./style.css?v=7",
+  "./game.js?v=7",
   "./manifest.json",
   "./icon-192.png",
   "./icon-512.png",
   "./icon-180.png",
-  "./gloria-chibi.png",
-  "./gloria-avatar.png"
+  "./gloria-avatar.png",
+  "./gloria-chibi.png"
 ];
 
 self.addEventListener("install", function (e) {
@@ -31,9 +31,23 @@ self.addEventListener("activate", function (e) {
 });
 
 self.addEventListener("fetch", function (e) {
-  e.respondWith(
-    caches.match(e.request).then(function (res) {
-      return res || fetch(e.request);
-    })
-  );
+  var url = e.request.url;
+  var isCode = e.request.mode === "navigate" || /[?&](v=)/.test(url) || /\.(js|css)([?#]|$)/.test(url);
+  if (isCode) {
+    // network-first for pages & code: updates land immediately, offline falls back to cache
+    e.respondWith(
+      fetch(e.request).then(function (res) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function (cache) { cache.put(e.request, copy); });
+        return res;
+      }).catch(function () { return caches.match(e.request); })
+    );
+  } else {
+    // cache-first for images & icons
+    e.respondWith(
+      caches.match(e.request).then(function (res) {
+        return res || fetch(e.request);
+      })
+    );
+  }
 });
